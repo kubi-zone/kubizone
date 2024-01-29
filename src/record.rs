@@ -8,6 +8,7 @@ use kube::{
     Api, Client, ResourceExt,
 };
 use kubizone_crds::{
+    kubizone_common::{DomainName, FullyQualifiedDomainName},
     v1alpha1::{Record, Zone, ZoneRef},
     PARENT_ZONE_LABEL,
 };
@@ -46,11 +47,15 @@ struct Data {
     client: Client,
 }
 
-async fn set_record_fqdn(client: Client, record: &Record, fqdn: &str) -> Result<(), kube::Error> {
+async fn set_record_fqdn(
+    client: Client,
+    record: &Record,
+    fqdn: &FullyQualifiedDomainName,
+) -> Result<(), kube::Error> {
     if record
         .status
         .as_ref()
-        .and_then(|status| status.fqdn.as_deref())
+        .and_then(|status| status.fqdn.as_ref())
         != Some(fqdn)
     {
         info!("updating fqdn for record {} to {}", record.name_any(), fqdn);
@@ -105,11 +110,8 @@ async fn set_record_parent_ref(
 async fn reconcile_records(record: Arc<Record>, ctx: Arc<Data>) -> Result<Action, kube::Error> {
     // Determine the fqdn of the record
 
-    match (
-        record.spec.zone_ref.as_ref(),
-        record.spec.domain_name.ends_with('.'),
-    ) {
-        (Some(zone_ref), false) => {
+    match (record.spec.zone_ref.as_ref(), &record.spec.domain_name) {
+        (Some(zone_ref), DomainName::Partial(partial_domain)) => {
             // Follow the zoneRef to the supposed parent zone, if it exists
             // or requeue later if it does not.
             let Some(parent_zone) = Api::<Zone>::namespaced(
@@ -139,11 +141,15 @@ async fn reconcile_records(record: Arc<Record>, ctx: Arc<Data>) -> Result<Action
 
             // This is only "alleged", since we don't know yet if the referenced
             // zone's delegations allow the adoption.
-            let alleged_fqdn = format!("{}.{}", record.spec.domain_name, parent_fqdn);
+            let alleged_fqdn = partial_domain + parent_fqdn;
 
             if parent_zone.spec.delegations.iter().any(|delegation| {
                 delegation.covers_namespace(record.namespace().as_deref().unwrap())
-                    && delegation.validate_record(parent_fqdn, &record.spec.type_, &alleged_fqdn)
+                    && delegation.validate_record(
+                        parent_fqdn,
+                        &record.spec.type_,
+                        &alleged_fqdn.clone().into(),
+                    )
             }) {
                 set_record_fqdn(ctx.client.clone(), &record, &alleged_fqdn).await?;
                 set_record_parent_ref(ctx.client.clone(), &record, &parent_zone.zone_ref()).await?;
@@ -152,8 +158,8 @@ async fn reconcile_records(record: Arc<Record>, ctx: Arc<Data>) -> Result<Action
                 return Ok(Action::requeue(Duration::from_secs(300)));
             }
         }
-        (None, true) => {
-            set_record_fqdn(ctx.client.clone(), &record, &record.spec.domain_name).await?;
+        (None, DomainName::Full(record_fqdn)) => {
+            set_record_fqdn(ctx.client.clone(), &record, record_fqdn).await?;
 
             // Fetch all zones from across the cluster and then filter down results to only parent
             // zones which are valid parent zones for this one.
@@ -165,7 +171,7 @@ async fn reconcile_records(record: Arc<Record>, ctx: Arc<Data>) -> Result<Action
                 .await?
                 .into_iter()
                 .filter(|parent| parent.validate_record(&record))
-                .max_by_key(|parent| parent.fqdn().unwrap().len())
+                .max_by_key(|parent| parent.fqdn().unwrap().as_ref().len())
             {
                 set_record_parent_ref(ctx.client.clone(), &record, &longest_parent_zone.zone_ref())
                     .await?;
@@ -176,11 +182,11 @@ async fn reconcile_records(record: Arc<Record>, ctx: Arc<Data>) -> Result<Action
                 );
             };
         }
-        (Some(zone_ref), true) => {
-            warn!("record {record} has both a fully qualified domain_name ({}) and a zoneRef({zone_ref}). It cannot have both.", record.spec.domain_name);
+        (Some(zone_ref), DomainName::Full(record_fqdn)) => {
+            warn!("record {record} has both a fully qualified domain_name ({record_fqdn}) and a zoneRef({zone_ref}). It cannot have both.");
             return Ok(Action::requeue(Duration::from_secs(300)));
         }
-        (None, false) => {
+        (None, DomainName::Partial(_)) => {
             warn!("{record} has neither zoneRef nor a fully qualified domainName, making it impossible to deduce its parent zone.");
             return Ok(Action::requeue(Duration::from_secs(300)));
         }

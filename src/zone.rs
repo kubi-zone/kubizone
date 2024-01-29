@@ -13,6 +13,7 @@ use kube::{
     Api, Client, ResourceExt,
 };
 use kubizone_crds::{
+    kubizone_common::{DomainName, FullyQualifiedDomainName},
     v1alpha1::{Record, Zone, ZoneEntry, ZoneRef, ZoneSpec},
     PARENT_ZONE_LABEL,
 };
@@ -58,11 +59,8 @@ pub async fn controller(client: Client) {
 }
 
 async fn reconcile_zones(zone: Arc<Zone>, ctx: Arc<Data>) -> Result<Action, kube::Error> {
-    match (
-        zone.spec.zone_ref.as_ref(),
-        zone.spec.domain_name.ends_with('.'),
-    ) {
-        (Some(zone_ref), false) => {
+    match (zone.spec.zone_ref.as_ref(), &zone.spec.domain_name) {
+        (Some(zone_ref), DomainName::Partial(partial_domain)) => {
             // Follow the zoneRef to the supposed parent zone, if it exists
             // or requeue later if it does not.
             let Some(parent_zone) = Api::<Zone>::namespaced(
@@ -95,11 +93,11 @@ async fn reconcile_zones(zone: Arc<Zone>, ctx: Arc<Data>) -> Result<Action, kube
 
             // This is only "alleged", since we don't know yet if the referenced
             // zone's delegations allow the adoption.
-            let alleged_fqdn = format!("{}.{}", zone.spec.domain_name, parent_fqdn);
+            let alleged_fqdn = partial_domain + parent_fqdn;
 
             if parent_zone.spec.delegations.iter().any(|delegation| {
                 delegation.covers_namespace(zone.namespace().as_deref().unwrap())
-                    && delegation.validate_zone(parent_fqdn, &alleged_fqdn)
+                    && delegation.validate_zone(parent_fqdn, &alleged_fqdn.clone().into())
             }) {
                 set_zone_fqdn(ctx.client.clone(), &zone, &alleged_fqdn).await?;
                 set_zone_parent_ref(ctx.client.clone(), &zone, parent_zone.zone_ref()).await?;
@@ -108,8 +106,8 @@ async fn reconcile_zones(zone: Arc<Zone>, ctx: Arc<Data>) -> Result<Action, kube
                 return Ok(Action::requeue(Duration::from_secs(300)));
             }
         }
-        (None, true) => {
-            set_zone_fqdn(ctx.client.clone(), &zone, &zone.spec.domain_name).await?;
+        (None, DomainName::Full(fqdn)) => {
+            set_zone_fqdn(ctx.client.clone(), &zone, fqdn).await?;
 
             // Fetch all zones from across the cluster and then filter down results to only parent
             // zones which are valid parent zones for this one.
@@ -121,7 +119,7 @@ async fn reconcile_zones(zone: Arc<Zone>, ctx: Arc<Data>) -> Result<Action, kube
                 .await?
                 .into_iter()
                 .filter(|parent| parent.validate_zone(&zone))
-                .max_by_key(|parent| parent.fqdn().unwrap().len())
+                .max_by_key(|parent| parent.fqdn().unwrap().as_ref().len())
             {
                 set_zone_parent_ref(ctx.client.clone(), &zone, longest_parent_zone.zone_ref())
                     .await?;
@@ -133,11 +131,11 @@ async fn reconcile_zones(zone: Arc<Zone>, ctx: Arc<Data>) -> Result<Action, kube
                 );
             };
         }
-        (Some(zone_ref), true) => {
-            warn!("zone {zone} has both a fully qualified domain_name ({}) and a zoneRef({zone_ref}). It cannot have both.", zone.spec.domain_name);
+        (Some(zone_ref), DomainName::Full(fqdn)) => {
+            warn!("zone {zone} has both a fully qualified domain_name ({fqdn}) and a zoneRef({zone_ref}). It cannot have both.");
             return Ok(Action::requeue(Duration::from_secs(300)));
         }
-        (None, false) => {
+        (None, DomainName::Partial(_)) => {
             warn!("{zone} has neither zoneRef nor a fully qualified domainName, making it impossible to deduce its parent zone.");
             return Ok(Action::requeue(Duration::from_secs(300)));
         }
@@ -147,13 +145,12 @@ async fn reconcile_zones(zone: Arc<Zone>, ctx: Arc<Data>) -> Result<Action, kube
     Ok(Action::requeue(Duration::from_secs(300)))
 }
 
-async fn set_zone_fqdn(client: Client, zone: &Zone, fqdn: &str) -> Result<(), kube::Error> {
-    if zone
-        .status
-        .as_ref()
-        .and_then(|status| status.fqdn.as_deref())
-        != Some(fqdn)
-    {
+async fn set_zone_fqdn(
+    client: Client,
+    zone: &Zone,
+    fqdn: &FullyQualifiedDomainName,
+) -> Result<(), kube::Error> {
+    if zone.status.as_ref().and_then(|status| status.fqdn.as_ref()) != Some(fqdn) {
         info!("updating fqdn for zone {} to {}", zone.name_any(), fqdn);
         Api::<Zone>::namespaced(client, zone.namespace().as_ref().unwrap())
             .patch_status(
@@ -215,6 +212,11 @@ async fn find_zone_nameserver_records(
         zone.zone_ref().as_label()
     ));
 
+    // If zone has not yet configured an FQDN, then we can't have nameservers.
+    let Some(zone_fqdn) = zone.fqdn() else {
+        return Ok(Vec::default());
+    };
+
     let records = Api::<Record>::all(client.clone()).list(&zone_ref).await?;
 
     // Reflect self-referential NS records from the subzone in the parent zone.
@@ -223,9 +225,11 @@ async fn find_zone_nameserver_records(
         .map(|record| &record.spec)
         .filter(|spec| spec.class.to_uppercase() == "IN")
         .filter(|spec| spec.type_.to_uppercase() == "NS")
-        .filter(|spec| spec.domain_name == "@" || Some(spec.domain_name.as_str()) == zone.fqdn())
+        .filter(|spec| {
+            spec.domain_name.as_ref() == "@" || spec.domain_name.as_ref() == zone_fqdn.as_ref()
+        })
         .map(|spec| ZoneEntry {
-            fqdn: zone.spec.domain_name.clone(),
+            fqdn: zone_fqdn.clone(),
             type_: spec.type_.clone(),
             class: spec.class.clone(),
             ttl: spec.ttl.unwrap_or(zone.spec.ttl),
@@ -245,12 +249,16 @@ async fn find_zone_nameserver_records(
             record.spec.type_.to_uppercase() == "A" || record.spec.type_.to_uppercase() == "AAAA"
         })
         .filter(|record| {
-            ns_records
-                .iter()
-                .any(|ns| Some(ns.rdata.as_str()) == record.fqdn())
+            // Only include A/AAAA records whose FQDN coincides with the values
+            // specified in the NS records.
+            record.fqdn().is_some_and(|record_fqdn| {
+                ns_records
+                    .iter()
+                    .any(|ns| ns.rdata.as_str() == record_fqdn.as_ref())
+            })
         })
         .map(|record| ZoneEntry {
-            fqdn: record.fqdn().unwrap().to_string(),
+            fqdn: record.fqdn().unwrap().clone(),
             type_: record.spec.type_.clone(),
             class: record.spec.class.clone(),
             ttl: record.spec.ttl.unwrap_or(zone.spec.ttl),
@@ -289,7 +297,7 @@ async fn update_zone_status(zone: Arc<Zone>, client: Client) -> Result<(), kube:
         }
 
         entries.push_back(ZoneEntry {
-            fqdn: record.spec.domain_name,
+            fqdn: record.fqdn().unwrap().clone(), // Unwrap safe since fqdn presence is checked in validate_record
             type_: record.spec.type_,
             class: record.spec.class,
             ttl: record.spec.ttl.unwrap_or(zone.spec.ttl),
@@ -360,7 +368,7 @@ async fn update_zone_status(zone: Arc<Zone>, client: Client) -> Result<(), kube:
     } = zone.spec;
 
     entries.push_front(ZoneEntry {
-        fqdn: origin.to_string(),
+        fqdn: origin.clone(),
         type_: "SOA".to_string(),
         class: "IN".to_string(),
         ttl,
