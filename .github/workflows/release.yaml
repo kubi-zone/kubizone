@@ -72,7 +72,7 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: |
-            ghcr.io/${{ github.repository_owner }}/${{ matrix.crate }}
+            ghcr.io/kubi-zone/kubizone
           tags: |
             type=schedule
             type=ref,event=branch
@@ -86,5 +86,5 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/${{ matrix.crate }}:buildcache
-          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/${{ matrix.crate }}:buildcache,mode=max
+          cache-from: type=registry,ref=ghcr.io/kubi-zone/kubizone:buildcache
+          cache-to: type=registry,ref=ghcr.io/kubi-zone/kubizone:buildcache,mode=max
