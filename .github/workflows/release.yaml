@@ -50,6 +50,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       packages: write
+      contents: write
     steps:
       - name: checkout repository
         uses: actions/checkout@v4
