@@ -282,14 +282,18 @@ async fn update_zone_status(zone: Arc<Zone>, client: Client) -> Result<(), kube:
         .list(&zone_ref)
         .await?
         .into_iter()
-        .map(|record| record.spec)
     {
+        if !zone.validate_record(&record) {
+            warn!("record {record} has {zone} configured as its parent, but the zone does not allow this delegation, action could be malicious.");
+            continue;
+        }
+
         entries.push_back(ZoneEntry {
-            fqdn: record.domain_name,
-            type_: record.type_,
-            class: record.class,
-            ttl: record.ttl.unwrap_or(zone.spec.ttl),
-            rdata: record.rdata,
+            fqdn: record.spec.domain_name,
+            type_: record.spec.type_,
+            class: record.spec.class,
+            ttl: record.spec.ttl.unwrap_or(zone.spec.ttl),
+            rdata: record.spec.rdata,
         })
     }
 
@@ -306,6 +310,11 @@ async fn update_zone_status(zone: Arc<Zone>, client: Client) -> Result<(), kube:
         .await?
         .into_iter()
     {
+        if !zone.validate_zone(&child_zone) {
+            warn!("record {child_zone} has {zone} configured as its parent, but the zone does not allow this delegation, action could be malicious!");
+            continue;
+        }
+
         entries.extend(find_zone_nameserver_records(&child_zone, client.clone()).await?)
     }
 
