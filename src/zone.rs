@@ -12,6 +12,7 @@ use kube::{
     runtime::{controller::Action, watcher, Controller},
     Api, Client, ResourceExt,
 };
+use kubizone_common::{Class, Type};
 use kubizone_crds::{
     kubizone_common::{DomainName, FullyQualifiedDomainName},
     v1alpha1::{Record, Zone, ZoneEntry, ZoneRef, ZoneSpec},
@@ -223,15 +224,15 @@ async fn find_zone_nameserver_records(
     let mut ns_records: Vec<_> = records
         .iter()
         .map(|record| &record.spec)
-        .filter(|spec| spec.class.to_uppercase() == "IN")
-        .filter(|spec| spec.type_.to_uppercase() == "NS")
+        .filter(|spec| spec.is_internet())
+        .filter(|spec| spec.is_ns())
         .filter(|spec| {
             spec.domain_name.to_string() == "@" || spec.domain_name.as_ref() == zone_fqdn.as_ref()
         })
         .map(|spec| ZoneEntry {
             fqdn: zone_fqdn.clone(),
-            type_: spec.type_.clone(),
-            class: spec.class.clone(),
+            type_: spec.type_,
+            class: spec.class,
             ttl: spec.ttl.unwrap_or(zone.spec.ttl),
             rdata: spec.rdata.clone(),
         })
@@ -244,10 +245,8 @@ async fn find_zone_nameserver_records(
     // domain itself.
     let glue_records: Vec<_> = records
         .iter()
-        .filter(|record| record.spec.class.to_uppercase() == "IN")
-        .filter(|record| {
-            record.spec.type_.to_uppercase() == "A" || record.spec.type_.to_uppercase() == "AAAA"
-        })
+        .filter(|record| record.spec.is_internet())
+        .filter(|record| record.spec.is_a() || record.spec.is_aaaa())
         .filter(|record| {
             // Only include A/AAAA records whose FQDN coincides with the values
             // specified in the NS records.
@@ -259,8 +258,8 @@ async fn find_zone_nameserver_records(
         })
         .map(|record| ZoneEntry {
             fqdn: record.fqdn().unwrap().clone(),
-            type_: record.spec.type_.clone(),
-            class: record.spec.class.clone(),
+            type_: record.spec.type_,
+            class: record.spec.class,
             ttl: record.spec.ttl.unwrap_or(zone.spec.ttl),
             rdata: record.spec.rdata.clone(),
         })
@@ -369,8 +368,8 @@ async fn update_zone_status(zone: Arc<Zone>, client: Client) -> Result<(), kube:
 
     entries.push_front(ZoneEntry {
         fqdn: origin.clone(),
-        type_: "SOA".to_string(),
-        class: "IN".to_string(),
+        type_: Type::SOA,
+        class: Class::IN,
         ttl,
         rdata: format!("ns.{origin} noc.{origin} ({serial} {refresh} {retry} {expire} {negative_response_cache})"),
     });

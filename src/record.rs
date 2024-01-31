@@ -147,7 +147,7 @@ async fn reconcile_records(record: Arc<Record>, ctx: Arc<Data>) -> Result<Action
                 delegation.covers_namespace(record.namespace().as_deref().unwrap())
                     && delegation.validate_record(
                         parent_fqdn,
-                        &record.spec.type_,
+                        record.spec.type_,
                         &alleged_fqdn.clone().into(),
                     )
             }) {
