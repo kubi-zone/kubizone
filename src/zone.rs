@@ -226,7 +226,7 @@ async fn find_zone_nameserver_records(
         .filter(|spec| spec.class.to_uppercase() == "IN")
         .filter(|spec| spec.type_.to_uppercase() == "NS")
         .filter(|spec| {
-            spec.domain_name.as_ref() == "@" || spec.domain_name.as_ref() == zone_fqdn.as_ref()
+            spec.domain_name.to_string() == "@" || spec.domain_name.as_ref() == zone_fqdn.as_ref()
         })
         .map(|spec| ZoneEntry {
             fqdn: zone_fqdn.clone(),
@@ -254,7 +254,7 @@ async fn find_zone_nameserver_records(
             record.fqdn().is_some_and(|record_fqdn| {
                 ns_records
                     .iter()
-                    .any(|ns| ns.rdata.as_str() == record_fqdn.as_ref())
+                    .any(|ns| ns.rdata.as_str() == record_fqdn.to_string())
             })
         })
         .map(|record| ZoneEntry {
