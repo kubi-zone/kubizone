@@ -251,9 +251,7 @@ async fn find_zone_nameserver_records(
             // Only include A/AAAA records whose FQDN coincides with the values
             // specified in the NS records.
             record.fqdn().is_some_and(|record_fqdn| {
-                ns_records
-                    .iter()
-                    .any(|ns| ns.rdata.as_str() == record_fqdn.to_string())
+                ns_records.iter().any(|ns| record_fqdn == ns.rdata.as_str())
             })
         })
         .map(|record| ZoneEntry {
