@@ -105,7 +105,7 @@ async fn reconcile_zones(zone: Arc<Zone>, ctx: Arc<Data>) -> Result<Action, kube
                 set_zone_fqdn(ctx.client.clone(), &zone, &alleged_fqdn).await?;
                 set_zone_parent_ref(ctx.client.clone(), &zone, parent_zone.zone_ref()).await?;
             } else {
-                warn!("parent zone {parent_zone} was found, but its delegations does not allow adoption of {zone} with {alleged_fqdn}");
+                warn!("parent zone {parent_zone} was found, but its delegations do not allow adoption of {zone} with {alleged_fqdn}");
                 return Ok(Action::requeue(Duration::from_secs(300)));
             }
         }
