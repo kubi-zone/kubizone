@@ -135,7 +135,7 @@ async fn reconcile_zones(zone: Arc<Zone>, ctx: Arc<Data>) -> Result<Action, kube
                     warn!("{longest_parent_zone} is the most immediate parent zone of {zone}, but the zone's delegation rules do not allow the adoption of it.");
                 }
             } else {
-                warn!(
+                info!(
                     "zone {} ({}) does not fit into any found parent zone. If this is a top level zone, then this is expected.",
                     zone.name_any(),
                     &zone.spec.domain_name
