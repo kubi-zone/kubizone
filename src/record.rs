@@ -108,8 +108,6 @@ async fn set_record_parent_ref(
 }
 
 async fn reconcile_records(record: Arc<Record>, ctx: Arc<Data>) -> Result<Action, kube::Error> {
-    // Determine the fqdn of the record
-
     match (record.spec.zone_ref.as_ref(), &record.spec.domain_name) {
         (Some(zone_ref), DomainName::Partial(partial_domain)) => {
             // Follow the zoneRef to the supposed parent zone, if it exists
