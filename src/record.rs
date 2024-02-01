@@ -141,22 +141,13 @@ async fn reconcile_records(record: Arc<Record>, ctx: Arc<Data>) -> Result<Action
 
             // This is only "alleged", since we don't know yet if the referenced
             // zone's delegations allow the adoption.
-            // Unwrap safe: pqdn + fqdn only fails if segments contain origin. Since we have
-            // apparently already failed at replacing an origin at this point, none exist.
-            let alleged_fqdn = partial_domain
-                .with_origin(parent_fqdn)
-                .or_else(|_| partial_domain + parent_fqdn)
-                .unwrap();
+            let alleged_fqdn = partial_domain.with_origin(parent_fqdn);
 
             trace!("record alleged fqdn: {partial_domain} + {parent_fqdn} = {alleged_fqdn}");
 
             if parent_zone.spec.delegations.iter().any(|delegation| {
                 delegation.covers_namespace(record.namespace().as_deref().unwrap())
-                    && delegation.validate_record(
-                        parent_fqdn,
-                        record.spec.type_,
-                        &alleged_fqdn.clone().into(),
-                    )
+                    && delegation.validate_record(parent_fqdn, record.spec.type_, &alleged_fqdn)
             }) {
                 set_record_fqdn(ctx.client.clone(), &record, &alleged_fqdn).await?;
                 set_record_parent_ref(ctx.client.clone(), &record, &parent_zone.zone_ref()).await?;
