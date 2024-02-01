@@ -121,11 +121,19 @@ async fn reconcile_zones(zone: Arc<Zone>, ctx: Arc<Data>) -> Result<Action, kube
                 .list(&ListParams::default())
                 .await?
                 .into_iter()
-                .filter(|parent| parent.validate_zone(&zone))
+                .filter(|parent| {
+                    parent
+                        .fqdn()
+                        .is_some_and(|parent_fqdn| fqdn.is_subdomain_of(parent_fqdn))
+                })
                 .max_by_key(|parent| parent.fqdn().unwrap().as_ref().len())
             {
-                set_zone_parent_ref(ctx.client.clone(), &zone, longest_parent_zone.zone_ref())
-                    .await?;
+                if longest_parent_zone.validate_zone(&zone) {
+                    set_zone_parent_ref(ctx.client.clone(), &zone, longest_parent_zone.zone_ref())
+                        .await?;
+                } else {
+                    warn!("{longest_parent_zone} is the most immediate parent zone of {zone}, but the zone's delegation rules do not allow the adoption of it.");
+                }
             } else {
                 warn!(
                     "zone {} ({}) does not fit into any found parent zone. If this is a top level zone, then this is expected.",

@@ -168,11 +168,23 @@ async fn reconcile_records(record: Arc<Record>, ctx: Arc<Data>) -> Result<Action
                 .list(&ListParams::default())
                 .await?
                 .into_iter()
-                .filter(|parent| parent.validate_record(&record))
+                .filter(|parent| {
+                    parent
+                        .fqdn()
+                        .is_some_and(|parent_fqdn| record_fqdn.is_subdomain_of(parent_fqdn))
+                })
                 .max_by_key(|parent| parent.fqdn().unwrap().as_ref().len())
             {
-                set_record_parent_ref(ctx.client.clone(), &record, &longest_parent_zone.zone_ref())
+                if longest_parent_zone.validate_record(&record) {
+                    set_record_parent_ref(
+                        ctx.client.clone(),
+                        &record,
+                        &longest_parent_zone.zone_ref(),
+                    )
                     .await?;
+                } else {
+                    warn!("{longest_parent_zone} is the most immediate parent zone of {record}, but the zone's delegation rules do not allow the adoption of it.");
+                }
             } else {
                 warn!(
                     "record {record} ({}) does not fit into any found parent Zone",
