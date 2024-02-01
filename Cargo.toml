@@ -3,7 +3,7 @@ name = "kubizone"
 description = "Kubizone Controller"
 keywords = ["kubernetes", "kubizone", "crd"]
 repository = "https://github.com/kubi-zone/kubizone"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 publish = false
 
@@ -16,8 +16,8 @@ tracing-subscriber = "0.3"
 time = "0.3"
 
 # Kubernetes
-kubizone-crds = "0.8"
-kubizone-common = "0.10"
+kubizone-crds = "0.8.2"
+kubizone-common = "0.11.0"
 kube = { version = "0.88", default-features = false, features = ["derive", "rustls-tls", "client", "runtime"] }
 k8s-openapi = { version = "0.21", features = ["v1_29"] }
 

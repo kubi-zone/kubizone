@@ -94,7 +94,14 @@ async fn reconcile_zones(zone: Arc<Zone>, ctx: Arc<Data>) -> Result<Action, kube
 
             // This is only "alleged", since we don't know yet if the referenced
             // zone's delegations allow the adoption.
-            let alleged_fqdn = partial_domain + parent_fqdn;
+            // Unwrap safe: pqdn + fqdn only fails if segments contain origin. Since we have
+            // apparently already failed at replacing an origin at this point, none exist.
+            let alleged_fqdn: FullyQualifiedDomainName = partial_domain
+                .with_origin(parent_fqdn)
+                .or_else(|_| partial_domain + parent_fqdn)
+                .unwrap();
+
+            trace!("zone alleged fqdn: {partial_domain} + {parent_fqdn} = {alleged_fqdn}");
 
             if parent_zone.spec.delegations.iter().any(|delegation| {
                 delegation.covers_namespace(zone.namespace().as_deref().unwrap())
@@ -126,7 +133,7 @@ async fn reconcile_zones(zone: Arc<Zone>, ctx: Arc<Data>) -> Result<Action, kube
                     .await?;
             } else {
                 warn!(
-                    "zone {} ({}) does not fit into any found parent Zone",
+                    "zone {} ({}) does not fit into any found parent zone. If this is a top level zone, then this is expected.",
                     zone.name_any(),
                     &zone.spec.domain_name
                 );
