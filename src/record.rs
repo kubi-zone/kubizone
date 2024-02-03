@@ -71,7 +71,7 @@ async fn set_record_fqdn(
             )
             .await?;
     } else {
-        debug!("not updating fqdn for record {} {fqdn}", record.name_any())
+        debug!("not updating fqdn for record {} {fqdn}, since it is already set.", record.name_any())
     }
     Ok(())
 }

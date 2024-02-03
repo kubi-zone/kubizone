@@ -51,8 +51,8 @@ pub async fn controller(client: Client) {
         )
         .for_each(|res| async move {
             match res {
-                Ok(o) => info!("reconciled {:?}", o),
-                Err(e) => warn!("reconcile failed: {}", e),
+                Ok(o) => info!("reconciled: {:?}", o),
+                Err(e) => warn!("reconciliation failed: {}", e),
             }
         });
 
@@ -175,7 +175,7 @@ async fn set_zone_fqdn(
             )
             .await?;
     } else {
-        debug!("not updating fqdn for zone {} {fqdn}", zone.name_any())
+        debug!("not updating fqdn for zone {} {fqdn}, since it is already set.", zone.name_any())
     }
     Ok(())
 }
