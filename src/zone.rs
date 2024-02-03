@@ -175,7 +175,10 @@ async fn set_zone_fqdn(
             )
             .await?;
     } else {
-        debug!("not updating fqdn for zone {} {fqdn}, since it is already set.", zone.name_any())
+        debug!(
+            "not updating fqdn for zone {} {fqdn}, since it is already set.",
+            zone.name_any()
+        )
     }
     Ok(())
 }
