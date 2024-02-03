@@ -216,70 +216,6 @@ async fn set_zone_parent_ref(
     Ok(())
 }
 
-async fn find_zone_nameserver_records(
-    zone: &Zone,
-    client: Client,
-) -> Result<Vec<ZoneEntry>, kube::Error> {
-    // Reference to this zone, which other zones and records will use to refer to it by.
-    let zone_ref = ListParams::default().labels(&format!(
-        "{PARENT_ZONE_LABEL}={}",
-        zone.zone_ref().as_label()
-    ));
-
-    // If zone has not yet configured an FQDN, then we can't have nameservers.
-    let Some(zone_fqdn) = zone.fqdn() else {
-        return Ok(Vec::default());
-    };
-
-    let records = Api::<Record>::all(client.clone()).list(&zone_ref).await?;
-
-    // Reflect self-referential NS records from the subzone in the parent zone.
-    let mut ns_records: Vec<_> = records
-        .iter()
-        .map(|record| &record.spec)
-        .filter(|spec| spec.is_internet())
-        .filter(|spec| spec.is_ns())
-        .filter(|spec| {
-            spec.domain_name.to_string() == "@" || spec.domain_name.as_ref() == zone_fqdn.as_ref()
-        })
-        .map(|spec| ZoneEntry {
-            fqdn: zone_fqdn.clone(),
-            type_: spec.type_,
-            class: spec.class,
-            ttl: spec.ttl.unwrap_or(zone.spec.ttl),
-            rdata: spec.rdata.clone(),
-        })
-        .collect();
-
-    // We also need to copy any A/AAAA records pointed to by the above NS records, to act
-    // as glue records. Glue records reside with the parent zone to instruct resolvers where
-    // to go for subzone domains. Without it, the resolver would only get back the NS record
-    // pointing at a domain like ns1.sub.example.org., but would have no way of resolving that
-    // domain itself.
-    let glue_records: Vec<_> = records
-        .iter()
-        .filter(|record| record.spec.is_internet())
-        .filter(|record| record.spec.is_a() || record.spec.is_aaaa())
-        .filter(|record| {
-            // Only include A/AAAA records whose FQDN coincides with the values
-            // specified in the NS records.
-            record.fqdn().is_some_and(|record_fqdn| {
-                ns_records.iter().any(|ns| record_fqdn == ns.rdata.as_str())
-            })
-        })
-        .map(|record| ZoneEntry {
-            fqdn: record.fqdn().unwrap().clone(),
-            type_: record.spec.type_,
-            class: record.spec.class,
-            ttl: record.spec.ttl.unwrap_or(zone.spec.ttl),
-            rdata: record.spec.rdata.clone(),
-        })
-        .collect();
-
-    ns_records.extend(glue_records.into_iter());
-    Ok(ns_records)
-}
-
 async fn update_zone_status(zone: Arc<Zone>, client: Client) -> Result<(), kube::Error> {
     let Some(origin) = zone.fqdn() else {
         return Ok(());
@@ -313,27 +249,6 @@ async fn update_zone_status(zone: Arc<Zone>, client: Client) -> Result<(), kube:
             ttl: record.spec.ttl.unwrap_or(zone.spec.ttl),
             rdata: record.spec.rdata,
         })
-    }
-
-    // Create any NS records defined in the child zones, for their own domains.
-    // For example, with a top-level domain of `example.org.` and a subdomain of
-    // `subdomain.example.org.`, the subdomain might have NS-records like:
-    //
-    //      @ 360 IN NS ns.subdomain.example.org.
-    //
-    // Which also need to be represented in the parent zone, so delegation works
-    // without having to manually configure NS records in the parent.
-    for child_zone in Api::<Zone>::all(client.clone())
-        .list(&zone_ref)
-        .await?
-        .into_iter()
-    {
-        if !zone.validate_zone(&child_zone) {
-            warn!("record {child_zone} has {zone} configured as its parent, but the zone does not allow this delegation, action could be malicious!");
-            continue;
-        }
-
-        entries.extend(find_zone_nameserver_records(&child_zone, client.clone()).await?)
     }
 
     let mut hasher = DefaultHasher::new();
