@@ -46,7 +46,7 @@ jobs:
   tag:
     needs: [lint, test]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    name: build operators
+    name: tag version
     runs-on: ubuntu-latest
     permissions:
       contents: write

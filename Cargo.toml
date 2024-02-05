@@ -3,7 +3,7 @@ name = "kubizone"
 description = "Kubizone Controller"
 keywords = ["kubernetes", "kubizone", "crd"]
 repository = "https://github.com/kubi-zone/kubizone"
-version = "0.3.3"
+version = "0.3.4"
 edition = "2021"
 publish = false
 
