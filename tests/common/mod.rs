@@ -34,6 +34,7 @@ pub fn has_entry(fqdn: &str) -> Box<dyn Fn(&Zone) -> bool + Send + Sync> {
     })
 }
 
+#[allow(dead_code)]
 pub async fn wait_for<R>(
     api: Api<R>,
     name: &str,
