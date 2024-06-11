@@ -1,5 +1,5 @@
 use std::{
-    collections::{hash_map::DefaultHasher, VecDeque},
+    collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
     sync::Arc,
     time::Duration,
@@ -230,9 +230,7 @@ async fn update_zone_status(zone: Arc<Zone>, client: Client) -> Result<(), kube:
         zone.zone_ref().as_label()
     ));
 
-    // Using a VecDeque here because we want to push_front an SOA record
-    // after all other records have been hashed.
-    let mut entries = VecDeque::new();
+    let mut entries = Vec::new();
 
     // Insert all child records into the entries list
     for record in Api::<Record>::all(client.clone())
@@ -245,7 +243,7 @@ async fn update_zone_status(zone: Arc<Zone>, client: Client) -> Result<(), kube:
             continue;
         }
 
-        entries.push_back(ZoneEntry {
+        entries.push(ZoneEntry {
             fqdn: record.fqdn().unwrap().clone(), // Unwrap safe since fqdn presence is checked in validate_record
             type_: record.spec.type_,
             class: record.spec.class,
@@ -295,7 +293,7 @@ async fn update_zone_status(zone: Arc<Zone>, client: Client) -> Result<(), kube:
         ..
     } = zone.spec;
 
-    entries.push_front(ZoneEntry {
+    entries.insert(0, ZoneEntry {
         fqdn: origin.clone(),
         type_: Type::SOA,
         class: Class::IN,
