@@ -25,6 +25,9 @@ struct Data {
     client: Client,
 }
 
+#[cfg(feature = "dev")]
+const CONTROLLER_NAME: &str = "dev.kubi.zone/zone-resolver";
+#[cfg(not(feature = "dev"))]
 const CONTROLLER_NAME: &str = "kubi.zone/zone-resolver";
 
 pub async fn controller(client: Client) {

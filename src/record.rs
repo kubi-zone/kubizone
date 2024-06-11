@@ -14,6 +14,9 @@ use kubizone_crds::{
 };
 use tracing::*;
 
+#[cfg(feature = "dev")]
+const CONTROLLER_NAME: &str = "dev.kubi.zone/record-resolver";
+#[cfg(not(feature = "dev"))]
 const CONTROLLER_NAME: &str = "kubi.zone/record-resolver";
 
 pub async fn controller(client: Client) {
