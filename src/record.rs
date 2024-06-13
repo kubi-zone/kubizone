@@ -9,7 +9,7 @@ use kube::{
 };
 use kubizone_crds::{
     kubizone_common::{DomainName, FullyQualifiedDomainName},
-    v1alpha1::{Record, Zone, ZoneRef},
+    v1alpha1::{DomainExt as _, Record, Zone, ZoneRef},
     PARENT_ZONE_LABEL,
 };
 use tracing::*;
@@ -54,7 +54,7 @@ async fn set_record_fqdn(
     client: Client,
     record: &Record,
     fqdn: &FullyQualifiedDomainName,
-) -> Result<(), kube::Error> {
+) -> Result<bool, kube::Error> {
     if record
         .status
         .as_ref()
@@ -73,13 +73,16 @@ async fn set_record_fqdn(
                 })),
             )
             .await?;
+
+        Ok(true)
     } else {
         debug!(
             "not updating fqdn for record {} {fqdn}, since it is already set.",
             record.name_any()
-        )
+        );
+
+        Ok(false)
     }
-    Ok(())
 }
 
 async fn set_record_parent_ref(
@@ -161,7 +164,10 @@ async fn reconcile_records(record: Arc<Record>, ctx: Arc<Data>) -> Result<Action
             }
         }
         (None, DomainName::Full(record_fqdn)) => {
-            set_record_fqdn(ctx.client.clone(), &record, record_fqdn).await?;
+            if set_record_fqdn(ctx.client.clone(), &record, record_fqdn).await? {
+                info!("record {record} fqdn changed to {record_fqdn}, requeuing.");
+                return Ok(Action::requeue(Duration::from_secs(1)));
+            }
 
             // Fetch all zones from across the cluster and then filter down results to only parent
             // zones which are valid parent zones for this one.

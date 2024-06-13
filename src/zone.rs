@@ -15,7 +15,7 @@ use kube::{
 use kubizone_common::{Class, Type};
 use kubizone_crds::{
     kubizone_common::{DomainName, FullyQualifiedDomainName},
-    v1alpha1::{Record, Zone, ZoneEntry, ZoneRef, ZoneSpec},
+    v1alpha1::{DomainExt as _, Record, Zone, ZoneEntry, ZoneRef, ZoneSpec},
     PARENT_ZONE_LABEL,
 };
 

@@ -14,49 +14,133 @@ use kube::{
     },
     Api, Client, CustomResourceExt, Resource, ResourceExt as _,
 };
-use kubizone_crds::v1alpha1::{Record, Zone};
+use kubizone_crds::v1alpha1::{DomainExt, Record, Zone};
+use tracing::{debug, error, info};
 
-#[allow(dead_code)]
-pub fn has_serial() -> Box<dyn Fn(&Zone) -> bool + Send + Sync> {
-    Box::new(move |zone: &Zone| zone.status.iter().any(|status| status.serial.is_some()))
+pub struct Check<R> {
+    pub name: String,
+    pub func: Box<dyn Fn(&R) -> Result<(), String> + Send + Sync>,
+}
+
+impl<R> Check<R> {
+    pub fn new(
+        name: &str,
+        func: impl Fn(&R) -> Result<(), String> + Send + Sync + 'static,
+    ) -> Self {
+        Check {
+            name: name.into(),
+            func: Box::new(func),
+        }
+    }
+
+    pub fn perform(&self, resource: &R) -> Result<(), String> {
+        if let Err(err) = (self.func)(resource) {
+            Err(format!("failed on: {}: {}", self.name, err))
+        } else {
+            Ok(())
+        }
+    }
 }
 
 #[allow(dead_code)]
-pub fn has_entry(fqdn: &str) -> Box<dyn Fn(&Zone) -> bool + Send + Sync> {
-    let fqdn = fqdn.to_string();
-    Box::new(move |zone: &Zone| {
-        zone.status.iter().any(|status| {
-            status
-                .entries
-                .iter()
-                .any(|entry| &entry.fqdn == fqdn.as_str())
-        })
+pub fn has_serial() -> Check<Zone> {
+    Check::new("has-serial", move |zone: &Zone| {
+        if zone.status.iter().any(|status| status.serial.is_some()) {
+            Ok(())
+        } else {
+            Err("not present".to_string())
+        }
     })
 }
 
 #[allow(dead_code)]
-pub async fn wait_for<R>(
-    api: Api<R>,
-    name: &str,
-    checks: &[Box<dyn Fn(&R) -> bool + Send + Sync>],
-) -> bool
+pub fn has_entry(fqdn: &str) -> Check<Zone> {
+    let fqdn = fqdn.to_string();
+
+    Check::new("has-entry", move |zone: &Zone| {
+        if zone.status.iter().any(|status| {
+            !status.entries.is_empty()
+                && status
+                    .entries
+                    .iter()
+                    .any(|entry| !entry.type_.is_soa() && &entry.fqdn == fqdn.as_str())
+        }) {
+            Ok(())
+        } else {
+            Err("not present".to_string())
+        }
+    })
+}
+
+#[allow(dead_code)]
+pub fn has_parent<R: DomainExt>(parent: &str) -> Check<R> {
+    let parent = parent.to_string();
+    Check::new("has-parent", move |resource: &R| {
+        let Some(label) = resource.parent() else {
+            return Err("no parent".to_string());
+        };
+
+        if label.as_label() != parent {
+            return Err(format!(
+                r#"wrong parent got "{label}", expected "{parent}""#,
+                label = label.as_label(),
+            ));
+        }
+
+        Ok(())
+    })
+}
+
+#[allow(dead_code)]
+pub fn not<R: 'static>(inner: Check<R>) -> Check<R> {
+    Check {
+        name: format!("not {}", inner.name),
+        func: Box::new(move |resource: &R| match (inner.func)(resource) {
+            Err(_) => Ok(()),
+            Ok(()) => Err("was true".to_string()),
+        }),
+    }
+}
+
+#[allow(dead_code)]
+pub async fn wait_for<R>(api: &Api<R>, name: &str, checks: &[Check<R>]) -> Result<R, ()>
 where
     R: Resource + Clone + std::fmt::Debug + DeserializeOwned,
 {
-    for _ in 0..10 {
+    'retry: for _ in 0..100 {
         let resource = api.get(name).await.unwrap();
 
         for check in checks.iter() {
-            if !check(&resource) {
+            if let Err(err) = check.perform(&resource) {
+                debug!("check {err}");
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                continue;
+                continue 'retry;
             }
         }
 
-        return true;
+        info!(
+            "ok {}: {}",
+            name,
+            checks
+                .iter()
+                .map(|check| check.name.clone())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        return Ok(resource);
     }
 
-    false
+    error!(
+        "timeout {}: {}",
+        name,
+        checks
+            .iter()
+            .map(|check| check.name.clone())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+
+    Err(())
 }
 
 /// Creates a namespace for the tests to run in, and starts the controllers.
@@ -64,6 +148,7 @@ pub async fn run<F: Future<Output = ()> + Send + 'static>(
     name: &str,
     func: impl Fn(Client, Namespace) -> F + Send + 'static,
 ) {
+    tracing_subscriber::fmt::init();
     let client = Client::try_default().await.unwrap();
 
     let namespaces = Api::<Namespace>::all(client.clone());
