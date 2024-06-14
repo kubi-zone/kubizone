@@ -17,7 +17,7 @@ struct Args {
 #[derive(Debug, Subcommand)]
 enum Command {
     Reconcile {
-        #[arg(long, default_value_t = 300)]
+        #[arg(env, long, default_value_t = 30)]
         requeue_time_secs: u64,
     },
 }
