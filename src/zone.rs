@@ -121,7 +121,7 @@ async fn reconcile_zones(
             }
         }
         (None, DomainName::Full(fqdn)) => {
-            set_fqdn(&CONTROLLER_NAME, ctx.client.clone(), &zone, fqdn).await?;
+            set_fqdn(CONTROLLER_NAME, ctx.client.clone(), &zone, fqdn).await?;
 
             // Fetch all zones from across the cluster and then filter down results to only parent
             // zones which are valid parent zones for this one.

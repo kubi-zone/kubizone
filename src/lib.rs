@@ -64,7 +64,7 @@ where
             Api::<R>::namespaced(client, resource.namespace().as_ref().unwrap())
                 .patch_metadata(
                     &resource.name_any(),
-                    &PatchParams::apply(&controller_name),
+                    &PatchParams::apply(controller_name),
                     &Patch::<R>::Json(json_patch::Patch(vec![PatchOperation::Remove(
                         RemoveOperation {
                             path: format!(
@@ -133,7 +133,7 @@ where
     Api::<R>::namespaced(client, resource.namespace().as_ref().unwrap())
         .patch_status(
             &resource.name_any(),
-            &PatchParams::apply(&controller_name),
+            &PatchParams::apply(controller_name),
             &Patch::Merge(json!({
                 "status": {
                     "fqdn": fqdn,

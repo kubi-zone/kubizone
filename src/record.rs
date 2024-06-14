@@ -92,7 +92,7 @@ async fn reconcile_records(
             }) {
                 set_fqdn(CONTROLLER_NAME, ctx.client.clone(), &record, &alleged_fqdn).await?;
                 set_parent(
-                    &CONTROLLER_NAME,
+                    CONTROLLER_NAME,
                     ctx.client.clone(),
                     &record,
                     Some(parent_zone.zone_ref()),
@@ -104,7 +104,7 @@ async fn reconcile_records(
             }
         }
         (None, DomainName::Full(record_fqdn)) => {
-            if set_fqdn(&CONTROLLER_NAME, ctx.client.clone(), &record, record_fqdn)
+            if set_fqdn(CONTROLLER_NAME, ctx.client.clone(), &record, record_fqdn)
                 .await?
                 .changed()
             {
@@ -130,7 +130,7 @@ async fn reconcile_records(
             {
                 if longest_parent_zone.validate_record(&record) {
                     set_parent(
-                        &CONTROLLER_NAME,
+                        CONTROLLER_NAME,
                         ctx.client.clone(),
                         &record,
                         Some(longest_parent_zone.zone_ref()),
@@ -138,14 +138,14 @@ async fn reconcile_records(
                     .await?;
                 } else {
                     warn!("{longest_parent_zone} is the most immediate parent zone of {record}, but the zone's delegation rules do not allow the adoption of it.");
-                    set_parent(&CONTROLLER_NAME, ctx.client.clone(), &record, None).await?;
+                    set_parent(CONTROLLER_NAME, ctx.client.clone(), &record, None).await?;
                 }
             } else {
                 warn!(
                     "record {record} ({}) does not fit into any found parent Zone",
                     &record.spec.domain_name
                 );
-                set_parent(&CONTROLLER_NAME, ctx.client.clone(), &record, None).await?;
+                set_parent(CONTROLLER_NAME, ctx.client.clone(), &record, None).await?;
             };
         }
         (Some(zone_ref), DomainName::Full(record_fqdn)) => {
