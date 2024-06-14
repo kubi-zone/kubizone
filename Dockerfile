@@ -1,5 +1,5 @@
 ##### Builder
-FROM rust:1.73-slim as builder
+FROM rust:1.79-slim as builder
 ARG UID=65203
 ARG GID=65203
 
