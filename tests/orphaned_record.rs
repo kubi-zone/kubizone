@@ -1,5 +1,6 @@
 #![feature(async_closure)]
 
+#[cfg(feature = "dev")]
 mod common;
 
 #[cfg(feature = "dev")]
