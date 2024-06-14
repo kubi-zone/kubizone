@@ -2,7 +2,7 @@
 
 mod common;
 
-//#[cfg(feature = "dev")]
+#[cfg(feature = "dev")]
 mod tests {
     use indoc::indoc;
     use json_patch::{PatchOperation, RemoveOperation};
