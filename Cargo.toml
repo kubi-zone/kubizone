@@ -25,8 +25,10 @@ kube = { version = "0.91.0", default-features = false, features = [
     "rustls-tls",
     "client",
     "runtime",
+    "jsonpatch",
 ] }
 k8s-openapi = { version = "0.22.0" }
+json-patch = { version = "1.4.0" }
 
 # Async
 tokio = { version = "1.33", features = ["macros", "rt"] }

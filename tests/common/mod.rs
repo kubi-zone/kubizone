@@ -14,6 +14,7 @@ use kube::{
     },
     Api, Client, CustomResourceExt, Resource, ResourceExt as _,
 };
+use kubizone::{record::RecordControllerContext, zone::ZoneControllerContext};
 use kubizone_crds::v1alpha1::{DomainExt, Record, Zone};
 use tracing::{debug, error, info};
 
@@ -172,8 +173,8 @@ pub async fn run<F: Future<Output = ()> + Send + 'static>(
     let controller_client = client.clone();
     tokio::spawn(async move {
         tokio::select! {
-            _ = kubizone::zone::controller(controller_client.clone()) => (),
-            _ = kubizone::record::controller(controller_client) => ()
+            _ = kubizone::zone::controller(ZoneControllerContext { client: controller_client.clone(), requeue_time: Duration::from_secs(1) }) => (),
+            _ = kubizone::record::controller(RecordControllerContext { client: controller_client.clone(), requeue_time: Duration::from_secs(1) }) => ()
         }
     });
 

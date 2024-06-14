@@ -1,4 +1,5 @@
 use futures::StreamExt;
+use json_patch::{PatchOperation, RemoveOperation};
 use k8s_openapi::serde_json::json;
 use std::{sync::Arc, time::Duration};
 
@@ -19,23 +20,17 @@ const CONTROLLER_NAME: &str = "dev.kubi.zone/record-resolver";
 #[cfg(not(feature = "dev"))]
 const CONTROLLER_NAME: &str = "kubi.zone/record-resolver";
 
-pub async fn controller(client: Client) {
-    let records = Api::<Record>::all(client.clone());
+pub async fn controller(context: RecordControllerContext) {
+    let records = Api::<Record>::all(context.client.clone());
 
     let record_controller = Controller::new(records, watcher::Config::default())
         .watches(
-            Api::<Zone>::all(client.clone()),
+            Api::<Zone>::all(context.client.clone()),
             watcher::Config::default(),
             kubizone_crds::watch_reference(PARENT_ZONE_LABEL),
         )
         .shutdown_on_signal()
-        .run(
-            reconcile_records,
-            record_error_policy,
-            Arc::new(Data {
-                client: client.clone(),
-            }),
-        )
+        .run(reconcile_records, record_error_policy, Arc::new(context))
         .for_each(|res| async move {
             match res {
                 Ok(o) => info!("reconciled {:?}", o),
@@ -46,8 +41,9 @@ pub async fn controller(client: Client) {
     record_controller.await;
 }
 
-struct Data {
-    client: Client,
+pub struct RecordControllerContext {
+    pub client: Client,
+    pub requeue_time: Duration,
 }
 
 async fn set_record_fqdn(
@@ -116,7 +112,34 @@ async fn set_record_parent_ref(
     Ok(())
 }
 
-async fn reconcile_records(record: Arc<Record>, ctx: Arc<Data>) -> Result<Action, kube::Error> {
+async fn remove_record_parent_ref(client: Client, record: &Arc<Record>) -> Result<(), kube::Error> {
+    info!(
+        "removing record {}'s {PARENT_ZONE_LABEL}",
+        record.name_any()
+    );
+
+    let patch = json_patch::Patch(vec![PatchOperation::Remove(RemoveOperation {
+        path: format!("/metadata/labels/{}", PARENT_ZONE_LABEL.replace("/", "~1")),
+    })]);
+
+    trace!("applying patch '{patch}' to {}", record.name_any());
+
+    Api::<Record>::namespaced(client, record.namespace().as_ref().unwrap())
+        .patch_metadata(
+            &record.name_any(),
+            &PatchParams::apply(CONTROLLER_NAME),
+            &Patch::<Record>::Json(patch),
+        )
+        .await?;
+
+    Ok(())
+}
+
+#[tracing::instrument(name = "record", skip_all)]
+async fn reconcile_records(
+    record: Arc<Record>,
+    ctx: Arc<RecordControllerContext>,
+) -> Result<Action, kube::Error> {
     match (record.spec.zone_ref.as_ref(), &record.spec.domain_name) {
         (Some(zone_ref), DomainName::Partial(partial_domain)) => {
             // Follow the zoneRef to the supposed parent zone, if it exists
@@ -134,7 +157,7 @@ async fn reconcile_records(record: Arc<Record>, ctx: Arc<Data>) -> Result<Action
             .await?
             else {
                 warn!("record {record} references unknown zone {zone_ref}");
-                return Ok(Action::requeue(Duration::from_secs(30)));
+                return Ok(Action::requeue(ctx.requeue_time));
             };
 
             // If the parent does not have a fully qualified domain name defined
@@ -160,7 +183,7 @@ async fn reconcile_records(record: Arc<Record>, ctx: Arc<Data>) -> Result<Action
                 set_record_parent_ref(ctx.client.clone(), &record, &parent_zone.zone_ref()).await?;
             } else {
                 warn!("parent zone {parent_zone} was found, but its delegations does not allow adoption of {record} with {alleged_fqdn} and type {}", record.spec.type_);
-                return Ok(Action::requeue(Duration::from_secs(300)));
+                return Ok(Action::requeue(ctx.requeue_time));
             }
         }
         (None, DomainName::Full(record_fqdn)) => {
@@ -194,28 +217,34 @@ async fn reconcile_records(record: Arc<Record>, ctx: Arc<Data>) -> Result<Action
                     .await?;
                 } else {
                     warn!("{longest_parent_zone} is the most immediate parent zone of {record}, but the zone's delegation rules do not allow the adoption of it.");
+                    remove_record_parent_ref(ctx.client.clone(), &record).await?;
                 }
             } else {
                 warn!(
                     "record {record} ({}) does not fit into any found parent Zone",
                     &record.spec.domain_name
                 );
+                remove_record_parent_ref(ctx.client.clone(), &record).await?;
             };
         }
         (Some(zone_ref), DomainName::Full(record_fqdn)) => {
             warn!("record {record} has both a fully qualified domain_name ({record_fqdn}) and a zoneRef({zone_ref}). It cannot have both.");
-            return Ok(Action::requeue(Duration::from_secs(300)));
+            return Ok(Action::requeue(ctx.requeue_time));
         }
         (None, DomainName::Partial(_)) => {
             warn!("{record} has neither zoneRef nor a fully qualified domainName, making it impossible to deduce its parent zone.");
-            return Ok(Action::requeue(Duration::from_secs(300)));
+            return Ok(Action::requeue(ctx.requeue_time));
         }
     }
 
-    Ok(Action::requeue(Duration::from_secs(30)))
+    Ok(Action::requeue(ctx.requeue_time))
 }
 
-fn record_error_policy(record: Arc<Record>, error: &kube::Error, _ctx: Arc<Data>) -> Action {
+fn record_error_policy(
+    record: Arc<Record>,
+    error: &kube::Error,
+    _ctx: Arc<RecordControllerContext>,
+) -> Action {
     error!(
         "record {} reconciliation encountered error: {error}",
         record.name_any()

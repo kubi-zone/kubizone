@@ -21,8 +21,9 @@ use kubizone_crds::{
 
 use tracing::log::*;
 
-struct Data {
-    client: Client,
+pub struct ZoneControllerContext {
+    pub client: Client,
+    pub requeue_time: Duration,
 }
 
 #[cfg(feature = "dev")]
@@ -30,28 +31,22 @@ const CONTROLLER_NAME: &str = "dev.kubi.zone/zone-resolver";
 #[cfg(not(feature = "dev"))]
 const CONTROLLER_NAME: &str = "kubi.zone/zone-resolver";
 
-pub async fn controller(client: Client) {
-    let zones = Api::<Zone>::all(client.clone());
+pub async fn controller(context: ZoneControllerContext) {
+    let zones = Api::<Zone>::all(context.client.clone());
 
     let zone_controller = Controller::new(zones.clone(), watcher::Config::default())
         .watches(
-            Api::<Zone>::all(client.clone()),
+            Api::<Zone>::all(context.client.clone()),
             watcher::Config::default(),
             kubizone_crds::watch_reference(PARENT_ZONE_LABEL),
         )
         .watches(
-            Api::<Record>::all(client.clone()),
+            Api::<Record>::all(context.client.clone()),
             watcher::Config::default(),
             kubizone_crds::watch_reference(PARENT_ZONE_LABEL),
         )
         .shutdown_on_signal()
-        .run(
-            reconcile_zones,
-            zone_error_policy,
-            Arc::new(Data {
-                client: client.clone(),
-            }),
-        )
+        .run(reconcile_zones, zone_error_policy, Arc::new(context))
         .for_each(|res| async move {
             match res {
                 Ok(o) => info!("reconciled: {:?}", o),
@@ -59,10 +54,15 @@ pub async fn controller(client: Client) {
             }
         });
 
+    warn!("zone controller exited");
     zone_controller.await;
 }
 
-async fn reconcile_zones(zone: Arc<Zone>, ctx: Arc<Data>) -> Result<Action, kube::Error> {
+#[tracing::instrument(name = "zone", skip_all)]
+async fn reconcile_zones(
+    zone: Arc<Zone>,
+    ctx: Arc<ZoneControllerContext>,
+) -> Result<Action, kube::Error> {
     match (zone.spec.zone_ref.as_ref(), &zone.spec.domain_name) {
         (Some(zone_ref), DomainName::Partial(partial_domain)) => {
             // Follow the zoneRef to the supposed parent zone, if it exists
@@ -109,7 +109,7 @@ async fn reconcile_zones(zone: Arc<Zone>, ctx: Arc<Data>) -> Result<Action, kube
                 set_zone_parent_ref(ctx.client.clone(), &zone, parent_zone.zone_ref()).await?;
             } else {
                 warn!("parent zone {parent_zone} was found, but its delegations do not allow adoption of {zone} with {alleged_fqdn}");
-                return Ok(Action::requeue(Duration::from_secs(300)));
+                return Ok(Action::requeue(ctx.requeue_time));
             }
         }
         (None, DomainName::Full(fqdn)) => {
@@ -147,16 +147,16 @@ async fn reconcile_zones(zone: Arc<Zone>, ctx: Arc<Data>) -> Result<Action, kube
         }
         (Some(zone_ref), DomainName::Full(fqdn)) => {
             warn!("zone {zone} has both a fully qualified domain_name ({fqdn}) and a zoneRef({zone_ref}). It cannot have both.");
-            return Ok(Action::requeue(Duration::from_secs(300)));
+            return Ok(Action::requeue(ctx.requeue_time));
         }
         (None, DomainName::Partial(_)) => {
             warn!("{zone} has neither zoneRef nor a fully qualified domainName, making it impossible to deduce its parent zone.");
-            return Ok(Action::requeue(Duration::from_secs(300)));
+            return Ok(Action::requeue(ctx.requeue_time));
         }
     }
 
     update_zone_status(zone, ctx.client.clone()).await?;
-    Ok(Action::requeue(Duration::from_secs(300)))
+    Ok(Action::requeue(ctx.requeue_time))
 }
 
 async fn set_zone_fqdn(
@@ -318,7 +318,11 @@ async fn update_zone_status(zone: Arc<Zone>, client: Client) -> Result<(), kube:
     Ok(())
 }
 
-fn zone_error_policy(zone: Arc<Zone>, error: &kube::Error, _ctx: Arc<Data>) -> Action {
+fn zone_error_policy(
+    zone: Arc<Zone>,
+    error: &kube::Error,
+    _ctx: Arc<ZoneControllerContext>,
+) -> Action {
     error!(
         "zone {} reconciliation encountered error: {error}",
         zone.name_any()
