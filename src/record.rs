@@ -1,19 +1,19 @@
 use futures::StreamExt;
-use json_patch::{PatchOperation, RemoveOperation};
-use k8s_openapi::serde_json::json;
 use std::{sync::Arc, time::Duration};
 
 use kube::{
-    api::{ListParams, Patch, PatchParams},
+    api::ListParams,
     runtime::{controller::Action, watcher, Controller},
     Api, Client, ResourceExt,
 };
 use kubizone_crds::{
-    kubizone_common::{DomainName, FullyQualifiedDomainName},
-    v1alpha1::{DomainExt as _, Record, Zone, ZoneRef},
+    kubizone_common::DomainName,
+    v1alpha1::{DomainExt as _, Record, Zone},
     PARENT_ZONE_LABEL,
 };
 use tracing::*;
+
+use crate::{set_fqdn, set_parent};
 
 #[cfg(feature = "dev")]
 const CONTROLLER_NAME: &str = "dev.kubi.zone/record-resolver";
@@ -44,95 +44,6 @@ pub async fn controller(context: RecordControllerContext) {
 pub struct RecordControllerContext {
     pub client: Client,
     pub requeue_time: Duration,
-}
-
-async fn set_record_fqdn(
-    client: Client,
-    record: &Record,
-    fqdn: &FullyQualifiedDomainName,
-) -> Result<bool, kube::Error> {
-    if record
-        .status
-        .as_ref()
-        .and_then(|status| status.fqdn.as_ref())
-        != Some(fqdn)
-    {
-        info!("updating fqdn for record {} to {}", record.name_any(), fqdn);
-        Api::<Record>::namespaced(client, record.namespace().as_ref().unwrap())
-            .patch_status(
-                &record.name_any(),
-                &PatchParams::apply(CONTROLLER_NAME),
-                &Patch::Merge(json!({
-                    "status": {
-                        "fqdn": fqdn,
-                    }
-                })),
-            )
-            .await?;
-
-        Ok(true)
-    } else {
-        debug!(
-            "not updating fqdn for record {} {fqdn}, since it is already set.",
-            record.name_any()
-        );
-
-        Ok(false)
-    }
-}
-
-async fn set_record_parent_ref(
-    client: Client,
-    record: &Arc<Record>,
-    parent_ref: &ZoneRef,
-) -> Result<(), kube::Error> {
-    if record.labels().get(PARENT_ZONE_LABEL) != Some(&parent_ref.as_label()) {
-        info!(
-            "updating record {}'s {PARENT_ZONE_LABEL} to {parent_ref}",
-            record.name_any()
-        );
-        Api::<Record>::namespaced(client, record.namespace().as_ref().unwrap())
-            .patch_metadata(
-                &record.name_any(),
-                &PatchParams::apply(CONTROLLER_NAME),
-                &Patch::Merge(json!({
-                    "metadata": {
-                        "labels": {
-                            PARENT_ZONE_LABEL: parent_ref.as_label()
-                        },
-                    }
-                })),
-            )
-            .await?;
-    } else {
-        debug!(
-            "not updating record {record}'s {PARENT_ZONE_LABEL} since it is already {parent_ref}"
-        )
-    }
-    Ok(())
-}
-
-async fn remove_record_parent_ref(client: Client, record: &Arc<Record>) -> Result<(), kube::Error> {
-    info!(
-        "removing record {}'s {PARENT_ZONE_LABEL}",
-        record.name_any()
-    );
-
-    let patch = json_patch::Patch(vec![PatchOperation::Remove(RemoveOperation {
-        path: format!("/metadata/labels/{}", PARENT_ZONE_LABEL.replace("/", "~1")),
-    })]);
-
-    trace!("applying patch '{patch}' to {}", record.name_any());
-
-    Api::<Record>::namespaced(client, record.namespace().as_ref().unwrap())
-        .patch_metadata(
-            &record.name_any(),
-            &PatchParams::apply(CONTROLLER_NAME),
-            &Patch::<Record>::Json(patch),
-        )
-        .await?;
-
-    Ok(())
 }
 
 #[tracing::instrument(name = "record", skip_all)]
@@ -179,15 +90,24 @@ async fn reconcile_records(
                 delegation.covers_namespace(record.namespace().as_deref().unwrap())
                     && delegation.validate_record(parent_fqdn, record.spec.type_, &alleged_fqdn)
             }) {
-                set_record_fqdn(ctx.client.clone(), &record, &alleged_fqdn).await?;
-                set_record_parent_ref(ctx.client.clone(), &record, &parent_zone.zone_ref()).await?;
+                set_fqdn(CONTROLLER_NAME, ctx.client.clone(), &record, &alleged_fqdn).await?;
+                set_parent(
+                    &CONTROLLER_NAME,
+                    ctx.client.clone(),
+                    &record,
+                    Some(parent_zone.zone_ref()),
+                )
+                .await?;
             } else {
                 warn!("parent zone {parent_zone} was found, but its delegations does not allow adoption of {record} with {alleged_fqdn} and type {}", record.spec.type_);
                 return Ok(Action::requeue(ctx.requeue_time));
             }
         }
         (None, DomainName::Full(record_fqdn)) => {
-            if set_record_fqdn(ctx.client.clone(), &record, record_fqdn).await? {
+            if set_fqdn(&CONTROLLER_NAME, ctx.client.clone(), &record, record_fqdn)
+                .await?
+                .changed()
+            {
                 info!("record {record} fqdn changed to {record_fqdn}, requeuing.");
                 return Ok(Action::requeue(Duration::from_secs(1)));
             }
@@ -209,22 +129,23 @@ async fn reconcile_records(
                 .max_by_key(|parent| parent.fqdn().unwrap().as_ref().len())
             {
                 if longest_parent_zone.validate_record(&record) {
-                    set_record_parent_ref(
+                    set_parent(
+                        &CONTROLLER_NAME,
                         ctx.client.clone(),
                         &record,
-                        &longest_parent_zone.zone_ref(),
+                        Some(longest_parent_zone.zone_ref()),
                     )
                     .await?;
                 } else {
                     warn!("{longest_parent_zone} is the most immediate parent zone of {record}, but the zone's delegation rules do not allow the adoption of it.");
-                    remove_record_parent_ref(ctx.client.clone(), &record).await?;
+                    set_parent(&CONTROLLER_NAME, ctx.client.clone(), &record, None).await?;
                 }
             } else {
                 warn!(
                     "record {record} ({}) does not fit into any found parent Zone",
                     &record.spec.domain_name
                 );
-                remove_record_parent_ref(ctx.client.clone(), &record).await?;
+                set_parent(&CONTROLLER_NAME, ctx.client.clone(), &record, None).await?;
             };
         }
         (Some(zone_ref), DomainName::Full(record_fqdn)) => {

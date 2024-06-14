@@ -5,8 +5,7 @@ use kube::Client;
 use record::RecordControllerContext;
 use zone::ZoneControllerContext;
 
-mod record;
-mod zone;
+pub use kubizone::*;
 
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]

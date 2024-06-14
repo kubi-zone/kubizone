@@ -15,11 +15,13 @@ use kube::{
 use kubizone_common::{Class, Type};
 use kubizone_crds::{
     kubizone_common::{DomainName, FullyQualifiedDomainName},
-    v1alpha1::{DomainExt as _, Record, Zone, ZoneEntry, ZoneRef, ZoneSpec},
+    v1alpha1::{DomainExt as _, Record, Zone, ZoneEntry, ZoneSpec},
     PARENT_ZONE_LABEL,
 };
 
 use tracing::log::*;
+
+use crate::{set_fqdn, set_parent};
 
 pub struct ZoneControllerContext {
     pub client: Client,
@@ -105,15 +107,21 @@ async fn reconcile_zones(
                 delegation.covers_namespace(zone.namespace().as_deref().unwrap())
                     && delegation.validate_zone(parent_fqdn, &alleged_fqdn)
             }) {
-                set_zone_fqdn(ctx.client.clone(), &zone, &alleged_fqdn).await?;
-                set_zone_parent_ref(ctx.client.clone(), &zone, parent_zone.zone_ref()).await?;
+                set_fqdn(CONTROLLER_NAME, ctx.client.clone(), &zone, &alleged_fqdn).await?;
+                set_parent(
+                    CONTROLLER_NAME,
+                    ctx.client.clone(),
+                    &zone,
+                    Some(parent_zone.zone_ref()),
+                )
+                .await?;
             } else {
                 warn!("parent zone {parent_zone} was found, but its delegations do not allow adoption of {zone} with {alleged_fqdn}");
                 return Ok(Action::requeue(ctx.requeue_time));
             }
         }
         (None, DomainName::Full(fqdn)) => {
-            set_zone_fqdn(ctx.client.clone(), &zone, fqdn).await?;
+            set_fqdn(&CONTROLLER_NAME, ctx.client.clone(), &zone, fqdn).await?;
 
             // Fetch all zones from across the cluster and then filter down results to only parent
             // zones which are valid parent zones for this one.
@@ -132,8 +140,13 @@ async fn reconcile_zones(
                 .max_by_key(|parent| parent.fqdn().unwrap().as_ref().len())
             {
                 if longest_parent_zone.validate_zone(&zone) {
-                    set_zone_parent_ref(ctx.client.clone(), &zone, longest_parent_zone.zone_ref())
-                        .await?;
+                    set_parent(
+                        CONTROLLER_NAME,
+                        ctx.client.clone(),
+                        &zone,
+                        Some(longest_parent_zone.zone_ref()),
+                    )
+                    .await?;
                 } else {
                     warn!("{longest_parent_zone} is the most immediate parent zone of {zone}, but the zone's delegation rules do not allow the adoption of it.");
                 }
@@ -157,66 +170,6 @@ async fn reconcile_zones(
 
     update_zone_status(zone, ctx.client.clone()).await?;
     Ok(Action::requeue(ctx.requeue_time))
-}
-
-async fn set_zone_fqdn(
-    client: Client,
-    zone: &Zone,
-    fqdn: &FullyQualifiedDomainName,
-) -> Result<(), kube::Error> {
-    if zone.status.as_ref().and_then(|status| status.fqdn.as_ref()) != Some(fqdn) {
-        info!("updating fqdn for zone {} to {}", zone.name_any(), fqdn);
-        Api::<Zone>::namespaced(client, zone.namespace().as_ref().unwrap())
-            .patch_status(
-                &zone.name_any(),
-                &PatchParams::apply(CONTROLLER_NAME),
-                &Patch::Merge(json!({
-                    "status": {
-                        "fqdn": fqdn,
-                    }
-                })),
-            )
-            .await?;
-    } else {
-        debug!(
-            "not updating fqdn for zone {} {fqdn}, since it is already set.",
-            zone.name_any()
-        )
-    }
-    Ok(())
-}
-
-async fn set_zone_parent_ref(
-    client: Client,
-    zone: &Arc<Zone>,
-    parent_ref: ZoneRef,
-) -> Result<(), kube::Error> {
-    if zone.labels().get(PARENT_ZONE_LABEL) != Some(&parent_ref.as_label()) {
-        info!(
-            "updating zone {}'s {PARENT_ZONE_LABEL} to {parent_ref}",
-            zone.name_any()
-        );
-
-        Api::<Zone>::namespaced(client, zone.namespace().as_ref().unwrap())
-            .patch_metadata(
-                &zone.name_any(),
-                &PatchParams::apply(CONTROLLER_NAME),
-                &Patch::Merge(json!({
-                    "metadata": {
-                        "labels": {
-                            PARENT_ZONE_LABEL: parent_ref.as_label()
-                        },
-                    }
-                })),
-            )
-            .await?;
-    } else {
-        debug!(
-            "not updating zone {}'s {PARENT_ZONE_LABEL} since it is already {parent_ref}",
-            zone.name_any()
-        )
-    }
-    Ok(())
 }
 
 async fn update_zone_status(zone: Arc<Zone>, client: Client) -> Result<(), kube::Error> {
