@@ -83,7 +83,7 @@ mod tests {
                         &PatchParams::apply("record-delegation-withdrawn"),
                         &Patch::<Zone>::Json(json_patch::Patch(vec![PatchOperation::Remove(
                             RemoveOperation {
-                                path: "/spec/delegations/0".to_string(),
+                                path: jsonptr::Pointer::new(&["spec", "delegations", "0"]),
                             },
                         )])),
                     )

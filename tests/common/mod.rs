@@ -153,6 +153,11 @@ pub async fn run<F: Future<Output = ()> + Send + 'static>(
     let client = Client::try_default().await.unwrap();
 
     let namespaces = Api::<Namespace>::all(client.clone());
+    namespaces
+        .delete(name, &DeleteParams::foreground())
+        .await
+        .ok();
+
     let namespace = namespaces
         .create(
             &PostParams::default(),
@@ -194,17 +199,26 @@ where
 {
     let api = Api::<CustomResourceDefinition>::all(client);
 
+    let api_clone = api.clone();
+    let watcher = tokio::spawn(async move {
+        tokio::time::timeout(
+            Duration::from_secs(30),
+            await_condition(
+                api_clone,
+                C::crd_name(),
+                conditions::is_crd_established().not(),
+            ),
+        )
+        .await
+        .unwrap()
+        .unwrap()
+    });
+
     api.delete(C::crd_name(), &DeleteParams::default())
         .await
         .ok();
 
-    tokio::time::timeout(
-        Duration::from_secs(30),
-        await_condition(api, C::crd_name(), conditions::is_crd_established().not()),
-    )
-    .await
-    .unwrap()
-    .unwrap();
+    watcher.await.unwrap();
 }
 
 async fn create_crd<C>(client: Client)

@@ -67,10 +67,7 @@ where
                     &PatchParams::apply(controller_name),
                     &Patch::<R>::Json(json_patch::Patch(vec![PatchOperation::Remove(
                         RemoveOperation {
-                            path: format!(
-                                "/metadata/labels/{}",
-                                PARENT_ZONE_LABEL.replace("/", "~1")
-                            ),
+                            path: jsonptr::Pointer::new(&["metadata", "labels", PARENT_ZONE_LABEL]),
                         },
                     )])),
                 )
