@@ -40,4 +40,4 @@ COPY --from=builder --chown=${UID}:${GID} --chmod=0550 /usr/local/bin/kubizone /
 USER ${UID}:${GID}
 
 ENTRYPOINT ["/app/kubizone"]
-CMD ["print-crds"]
+CMD ["help"]
