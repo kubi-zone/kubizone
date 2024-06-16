@@ -1,6 +1,6 @@
 ## Unreleased
 
-### Added
+### Fixed
 * `kubi.zone/parent-zone` labels are now removed in cases where the delegation has lapsed, or the parent zone no longer exists.
 
 ### Changed
