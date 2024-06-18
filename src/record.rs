@@ -39,6 +39,7 @@ pub async fn controller(context: RecordControllerContext) {
         });
 
     record_controller.await;
+    warn!("record controller exited");
 }
 
 pub struct RecordControllerContext {

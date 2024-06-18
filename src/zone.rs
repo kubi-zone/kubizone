@@ -56,8 +56,8 @@ pub async fn controller(context: ZoneControllerContext) {
             }
         });
 
-    warn!("zone controller exited");
     zone_controller.await;
+    warn!("zone controller exited");
 }
 
 #[tracing::instrument(name = "zone", skip_all)]
