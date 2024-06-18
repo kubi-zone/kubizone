@@ -34,3 +34,11 @@ Creates:
 * Record `good.example.org` in `kubizone-split-prod` namespace. Verifies adoption.
 * Record `good.dev.example.org` in `kubizone-split-dev` namespace. Verifies adoption.
 * Record `bad.example.org` in `kubizone-split-dev` namespace. Verifies that this record is *not* adopted.
+
+### limited_adoption
+
+Creates:
+* Zone `example.org.` with record delegation for `A` record `good.*`.
+* `A`-record `good.example.org.`. Verifies adoption.
+* `A`-record `bad.example.org.`. Verifies non-adoption due to `bad` not being delegated.
+* `AAAA`-record `good.example.org`. Verifies non-adoption due to `AAAA` not being delegated.

@@ -49,7 +49,7 @@ mod tests {
             // test *.example.org delegation to kubizone-split-prod
             {
                 let good_example_org = ctx
-                    .record(
+                    .a_record(
                         "kubizone-split-prod",
                         "good-example-org",
                         "good.example.org.",
@@ -72,7 +72,7 @@ mod tests {
             // test *.example.org non-delegation to kubizone-split-dev
             {
                 let bad_example_org = ctx
-                    .record("kubizone-split-dev", "bad-dev-example", "bad.example.org.")
+                    .a_record("kubizone-split-dev", "bad-dev-example", "bad.example.org.")
                     .await
                     .unwrap();
 
@@ -94,7 +94,7 @@ mod tests {
             // test *.dev.example.org delegation to kubizone-split-dev
             {
                 let good_dev_example_org = ctx
-                    .record(
+                    .a_record(
                         "kubizone-split-dev",
                         "good-dev-example-org",
                         "good.dev.example.org.",

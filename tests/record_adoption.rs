@@ -35,7 +35,7 @@ mod tests {
                 .unwrap();
 
             let www_example_org = ctx
-                .record(
+                .a_record(
                     "kubizone-record-adoption",
                     "www-example-org",
                     "www.example.org.",

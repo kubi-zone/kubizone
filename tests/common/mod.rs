@@ -15,7 +15,7 @@ use kube::{
     Api, Client, CustomResourceExt, Resource, ResourceExt,
 };
 use kubizone::{record::RecordControllerContext, zone::ZoneControllerContext};
-use kubizone_common::DomainName;
+use kubizone_common::{DomainName, Type};
 use kubizone_crds::v1alpha1::{Delegation, DomainExt, Record, RecordSpec, Zone, ZoneSpec};
 use tokio::sync::RwLock;
 use tracing::{debug, error, info};
@@ -64,6 +64,7 @@ impl Context {
         namespace: &str,
         name: &str,
         fqdn: &str,
+        type_: Type,
     ) -> Result<Record, kube::Error> {
         let api = Api::<Record>::namespaced(self.inner.read().await.client.clone(), namespace);
 
@@ -78,7 +79,7 @@ impl Context {
                     spec: RecordSpec {
                         domain_name: DomainName::try_from(fqdn).unwrap(),
                         zone_ref: None,
-                        type_: kubizone_common::Type::A,
+                        type_,
                         class: kubizone_common::Class::IN,
                         ttl: None,
                         rdata: "127.0.0.1".to_string(),
@@ -90,6 +91,15 @@ impl Context {
 
         self.inner.write().await.records.push(record.clone());
         Ok(record)
+    }
+
+    pub async fn a_record(
+        &self,
+        namespace: &str,
+        name: &str,
+        fqdn: &str,
+    ) -> Result<Record, kube::Error> {
+        self.record(namespace, name, fqdn, Type::A).await
     }
 
     pub async fn zone(
@@ -133,13 +143,15 @@ impl Context {
         let api = Api::<R>::namespaced(client, resource.meta().namespace.as_ref().unwrap());
         let name = resource.name_any();
 
+        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+
         'retry: for _ in 0..100 {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             let resource = api.get(&name).await.unwrap();
 
             for check in checks.iter() {
                 if let Err(err) = check.perform(&resource) {
                     debug!("check {err}");
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                     continue 'retry;
                 }
             }
@@ -174,6 +186,7 @@ impl Context {
         R: Resource<Scope = NamespaceResourceScope> + Clone + DeserializeOwned + std::fmt::Debug,
         <R as Resource>::DynamicType: Default,
     {
+        info!("deleting {}", resource.name_any());
         let client = self.inner.read().await.client.clone();
 
         let api = Api::<R>::namespaced(client, resource.namespace().as_deref().unwrap());

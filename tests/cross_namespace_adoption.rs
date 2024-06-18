@@ -39,7 +39,7 @@ mod tests {
             // so the following record won't be adopted.
             {
                 let bad_example_org = ctx
-                    .record(
+                    .a_record(
                         "kubizone-local-namespace",
                         "bad-example-org",
                         "bad.example.org.",
@@ -64,7 +64,7 @@ mod tests {
 
             {
                 let good_example_org = ctx
-                    .record(
+                    .a_record(
                         "kubizone-foreign-namespace",
                         "good-example-org",
                         "good.example.org.",
