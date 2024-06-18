@@ -33,6 +33,7 @@ pub struct Context {
     inner: Arc<RwLock<ContextInner>>,
 }
 
+#[allow(dead_code)]
 impl Context {
     pub async fn namespace(&self, name: &str) -> Result<Namespace, kube::Error> {
         let api = Api::<Namespace>::all(self.inner.read().await.client.clone());
@@ -168,6 +169,25 @@ impl Context {
         Err(())
     }
 
+    pub async fn delete<R>(&self, resource: &R) -> Result<(), kube::Error>
+    where
+        R: Resource<Scope = NamespaceResourceScope> + Clone + DeserializeOwned + std::fmt::Debug,
+        <R as Resource>::DynamicType: Default,
+    {
+        let client = self.inner.read().await.client.clone();
+
+        let api = Api::<R>::namespaced(client, resource.namespace().as_deref().unwrap());
+
+        api.delete(&resource.name_any(), &DeleteParams::foreground())
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn client(&self) -> Client {
+        self.inner.read().await.client.clone()
+    }
+
     async fn clean(self) {
         let mut inner = self.inner.write().await;
         let client = inner.client.clone();
@@ -249,7 +269,7 @@ pub fn has_entry(fqdn: &str) -> Check<Zone> {
         }) {
             Ok(())
         } else {
-            Err("not present".to_string())
+            Err(format!("{fqdn} not present"))
         }
     })
 }

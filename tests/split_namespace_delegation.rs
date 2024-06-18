@@ -1,9 +1,9 @@
 #![feature(async_closure)]
 
-//#[cfg(feature = "dev")]
+#[cfg(feature = "dev")]
 mod common;
 
-//#[cfg(feature = "dev")]
+#[cfg(feature = "dev")]
 mod tests {
     use kubizone_common::Pattern;
     use kubizone_crds::v1alpha1::{Delegation, RecordDelegation};
