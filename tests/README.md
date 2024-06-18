@@ -42,3 +42,9 @@ Creates:
 * `A`-record `good.example.org.`. Verifies adoption.
 * `A`-record `bad.example.org.`. Verifies non-adoption due to `bad` not being delegated.
 * `AAAA`-record `good.example.org`. Verifies non-adoption due to `AAAA` not being delegated.
+
+### longest_matching
+Creates:
+* Zone `example.org` with no delegation rules.
+* Zone `sub.example.org` with record delegation to `*`.
+* Record `good.sub.sub.example.org`. Verifies that record is adopted by `sub.example.org.` and *not* `example.org`.
