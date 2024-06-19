@@ -19,7 +19,7 @@ spec:
   domainName: example.org.
   delegations:
     - records:
-      - pattern: "*"
+        - pattern: "*"
     - zones: ["sub"]
 
 # The sub-zone on the other hand only allows MX records.
@@ -32,8 +32,8 @@ spec:
   domainName: sub.example.org.
   delegations:
     - records:
-      - pattern: "*"
-        types: ["MX"]
+        - pattern: "*"
+          types: ["MX"]
 
 # Even though the following record is allowed by `example-org`s delegation rules,
 # because the "sub" subzone has been delegated, the zone won't adopt it, and it will

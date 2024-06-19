@@ -8,7 +8,7 @@ spec:
   domainName: example.org.
   delegations:
     - records:
-      - pattern: "*"
+        - pattern: "*"
 
 # This record will be adopted by the example-org zone and included in its list of zone entries.
 ---

@@ -12,10 +12,10 @@ spec:
   delegations:
     - namespaces: ["development"]
       records:
-      - pattern: "*.dev"
+        - pattern: "*.dev"
     - namespaces: ["production"]
       records:
-      - pattern: "*.prod"
+        - pattern: "*.prod"
 
 # This record will be adopted by the zone
 ---

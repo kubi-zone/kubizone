@@ -11,7 +11,7 @@ spec:
   domainName: example.org.
   delegations:
     - records:
-      - pattern: "*"
+        - pattern: "*"
     - zones: ["sub"]
 
 # example-org has delegated responsibility of the sub.example.org. domain to
@@ -25,7 +25,7 @@ spec:
   domainName: sub.example.org.
   delegations:
     - records:
-      - pattern: "*"
+        - pattern: "*"
 
 # Even though this record is technically allowed to be adopted by both of the above zones
 # the fact that sub.example.org is delegated *and* there's a Zone which fits that pattern,
@@ -39,7 +39,6 @@ spec:
   domainName: www.sub.example.org.
   type: A
   rdata: "192.168.0.2"
-
 # NOTE! Deleting the sub-example-org zone at this point, would orphan the record, and since
 # example-org is the only remaining valid parent, it would adopt the record.
 #
