@@ -1,6 +1,9 @@
+use std::pin::Pin;
 use std::time::Duration;
 
 use clap::{command, Parser, Subcommand};
+use futures::{stream::FuturesUnordered, Future};
+use ingress::IngressControllerContext;
 use kube::Client;
 use record::RecordControllerContext;
 use zone::ZoneControllerContext;
@@ -17,8 +20,14 @@ struct Args {
 #[derive(Debug, Subcommand)]
 enum Command {
     Reconcile {
+        /// Default time to wait between requeuing resources.
         #[arg(env, long, default_value_t = 30)]
         requeue_time_secs: u64,
+
+        /// If enabled, controller will create Records for all
+        /// ingresses based on its hosts and loadBalancer settings.
+        #[arg(env, long, default_value_t = false)]
+        ingress_record_creation: bool,
     },
 }
 
@@ -28,17 +37,42 @@ async fn main() {
     let args = Args::parse();
 
     match args.command {
-        Command::Reconcile { requeue_time_secs } => {
+        Command::Reconcile {
+            requeue_time_secs,
+            ingress_record_creation,
+        } => {
             let client = Client::try_default().await.unwrap();
 
-            tokio::select! {
-                _ = zone::controller(ZoneControllerContext {
+            let futures: FuturesUnordered<Pin<Box<dyn Future<Output = ()>>>> =
+                FuturesUnordered::new();
+
+            futures.push(Box::pin(async {
+                zone::controller(ZoneControllerContext {
                     client: client.clone(),
-                    requeue_time: Duration::from_secs(requeue_time_secs)}) => (),
-                _ = record::controller(RecordControllerContext {
+                    requeue_time: Duration::from_secs(requeue_time_secs),
+                })
+                .await;
+            }));
+
+            futures.push(Box::pin(async {
+                record::controller(RecordControllerContext {
                     client: client.clone(),
-                    requeue_time: Duration::from_secs(requeue_time_secs)}) => ()
+                    requeue_time: Duration::from_secs(requeue_time_secs),
+                })
+                .await;
+            }));
+
+            if ingress_record_creation {
+                futures.push(Box::pin(async {
+                    ingress::controller(IngressControllerContext {
+                        client: client.clone(),
+                        requeue_time: Duration::from_secs(requeue_time_secs),
+                    })
+                    .await;
+                }));
             }
+
+            futures::future::select_all(futures.into_iter()).await;
         }
     }
 }

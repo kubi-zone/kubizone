@@ -1,3 +1,4 @@
+pub mod ingress;
 pub mod record;
 pub mod zone;
 
