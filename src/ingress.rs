@@ -4,12 +4,17 @@ use kubizone_common::{Class, DomainName, Type};
 use std::{net::IpAddr, str::FromStr, sync::Arc, time::Duration};
 
 use kube::{
-    api::{ObjectMeta, PostParams},
+    api::{ObjectMeta, PatchParams},
     runtime::{controller::Action, watcher, Controller},
     Api, Client, Resource, ResourceExt,
 };
 use kubizone_crds::v1alpha1::{Record, RecordSpec};
 use tracing::*;
+
+#[cfg(feature = "dev")]
+const CONTROLLER_NAME: &str = "dev.kubi.zone/ingress-resolver";
+#[cfg(not(feature = "dev"))]
+const CONTROLLER_NAME: &str = "kubi.zone/ingress-resolver";
 
 pub async fn controller(context: IngressControllerContext) {
     let ingresses = Api::<Ingress>::all(context.client.clone());
@@ -99,10 +104,11 @@ async fn reconcile_ingresses(
             let metadata = metadata(ipv4);
             info!("creating record {:?}: {hostname} -> {ipv4}", metadata.name);
             records
-                .create(
-                    &PostParams::default(),
-                    &Record {
-                        metadata: metadata,
+                .patch(
+                    metadata.name.as_deref().unwrap(),
+                    &PatchParams::apply(CONTROLLER_NAME),
+                    &kube::api::Patch::Apply(Record {
+                        metadata: metadata.clone(),
                         spec: RecordSpec {
                             domain_name: hostname.to_fully_qualified().into(),
                             zone_ref: None,
@@ -112,7 +118,7 @@ async fn reconcile_ingresses(
                             rdata: ipv4.to_string(),
                         },
                         status: None,
-                    },
+                    }),
                 )
                 .await?;
         }
@@ -121,10 +127,11 @@ async fn reconcile_ingresses(
             let metadata = metadata(ipv6);
             info!("creating record {:?}: {hostname} -> {ipv6}", metadata.name);
             records
-                .create(
-                    &PostParams::default(),
-                    &Record {
-                        metadata,
+                .patch(
+                    metadata.name.as_deref().unwrap(),
+                    &PatchParams::apply(CONTROLLER_NAME),
+                    &kube::api::Patch::Apply(Record {
+                        metadata: metadata.clone(),
                         spec: RecordSpec {
                             domain_name: hostname.to_fully_qualified().into(),
                             zone_ref: None,
@@ -134,7 +141,7 @@ async fn reconcile_ingresses(
                             rdata: ipv6.to_string(),
                         },
                         status: None,
-                    },
+                    }),
                 )
                 .await?;
         }
